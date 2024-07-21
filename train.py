@@ -72,8 +72,7 @@ def run_validation(model, validation_ds, tokenizer_src, tokenizer_tgt, max_len, 
             encoder_mask = batch["encoder_mask"].to(device) # (b, 1, 1, seq_len)
 
             # check that the batch size is 1
-            assert encoder_input.size(
-                0) == 1, "Batch size must be 1 for validation"
+            assert encoder_input.size(0) == 1, "Batch size must be 1 for validation"
 
             model_out = greedy_decode(model, encoder_input, encoder_mask, tokenizer_src, tokenizer_tgt, max_len, device)
 
@@ -114,24 +113,6 @@ def run_validation(model, validation_ds, tokenizer_src, tokenizer_tgt, max_len, 
         bleu = metric(predicted, expected)
         writer.add_scalar('validation BLEU', bleu, global_step)
         writer.flush()
-
-    
-    
-    # Evaluate the character error rate
-    # Compute the char error rate 
-    metric = torchmetrics.CharErrorRate()
-    cer = metric(predicted, expected)
-    wandb.log({'validation/cer': cer, 'global_step': global_step})
-
-    # Compute the word error rate
-    metric = torchmetrics.WordErrorRate()
-    wer = metric(predicted, expected)
-    wandb.log({'validation/wer': wer, 'global_step': global_step})
-
-    # Compute the BLEU metric
-    metric = torchmetrics.BLEUScore()
-    bleu = metric(predicted, expected)
-    wandb.log({'validation/BLEU': bleu, 'global_step': global_step})
 
 
 def get_all_sentences(ds, lang):
@@ -212,17 +193,13 @@ def train_model(config):
     
     loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer_src.token_to_id('[PAD]'), label_smoothing=0.1).to(device)
 
-    # define our custom x axis metric
-    wandb.define_metric("global_step")
-    # define which metrics will be plotted against it
-    wandb.define_metric("validation/*", step_metric="global_step")
-    wandb.define_metric("train/*", step_metric="global_step")
-
 
     for epoch in range(initial_epoch, config['num_epochs']):
+        torch.cuda.empty_cache()
         model.train()
         batch_iterator = tqdm(train_dataloader, desc=f"Processing epoch {epoch:02d}")
         for batch in batch_iterator:
+        
             encoder_input = batch['encoder_input'].to(device) #(B, seq_len)
             decoder_input = batch['decoder_input'].to(device) #(B, seq_len)
             encoder_mask = batch['encoder_mask'].to(device) #(B,1,1, seq_len)
@@ -251,6 +228,8 @@ def train_model(config):
             optimizer.zero_grad()
 
             global_step+=1
+        # Run validation at the end of every epoch
+        run_validation(model, val_dataloader, tokenizer_src, tokenizer_tgt, config['seq_len'], device, lambda msg: batch_iterator.write(msg), global_step, writer)
         #Save the model at the end of every epoch
         model_filename = get_weights_file_path(config, f"{epoch:02d}")
         torch.save({
